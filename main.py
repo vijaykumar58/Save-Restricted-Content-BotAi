@@ -12,18 +12,20 @@ async def main():
         plugins={"root": "handlers"}
     )
     
-    # Start the bot
-    await bot.start()
-    print("Bot started successfully!")
-    
-    # Load all handlers
-    await load_handlers(bot)
-    
-    # Run until stopped
-    await idle()
-    
-    # Stop the bot
-    await bot.stop()
+    try:
+        await bot.start()
+        print("Bot started successfully!")
+        
+        # Load all handlers
+        load_handlers(bot)
+        
+        # Keep running
+        await idle()
+        
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        await bot.stop()
 
 if __name__ == "__main__":
     asyncio.run(main())
