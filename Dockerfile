@@ -1,4 +1,4 @@
-FROM python:3.9-slim
+FROM python:3.10.4-slim-buster
 
 # Install system dependencies
 RUN apt-get update && \
