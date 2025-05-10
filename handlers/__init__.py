@@ -11,5 +11,3 @@ def load_handlers(client):
     premium_handlers(client)
     batch_handlers(client)
     utils_handlers(client)
-
-
