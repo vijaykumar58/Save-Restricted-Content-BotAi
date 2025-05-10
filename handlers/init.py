@@ -4,8 +4,8 @@ from .premium import premium_handlers
 from .batch import batch_handlers
 from .utils import utils_handlers
 
-async def load_handlers(client):
-    # Register all handlers
+def load_handlers(client):
+    """Load all handlers"""
     start_handler(client)
     login_handlers(client)
     premium_handlers(client)
