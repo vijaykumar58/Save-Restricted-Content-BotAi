@@ -18,8 +18,8 @@ class Config:
     OWNER_ID = list(map(int, os.getenv("OWNER_ID", "123456789").split()))
     
     # Channels
-    LOG_CHANNEL = os.getenv("LOG_CHANNEL", savecontentdiscusion)
-    FORCE_SUB_CHANNEL = os.getenv("FORCE_SUB_CHANNEL", allfreecoursesgovtexam)
+    LOG_CHANNEL = os.getenv("LOG_CHANNEL", "")
+    FORCE_SUB_CHANNEL = os.getenv("FORCE_SUB_CHANNEL", "")
     
     # Premium
     PREMIUM_PRICES = {
