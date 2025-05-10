@@ -5,9 +5,11 @@ from .batch import batch_handlers
 from .utils import utils_handlers
 
 def load_handlers(client):
-    """Load all handlers"""
+    """Load all handler functions"""
     start_handler(client)
     login_handlers(client)
     premium_handlers(client)
     batch_handlers(client)
     utils_handlers(client)
+
+
