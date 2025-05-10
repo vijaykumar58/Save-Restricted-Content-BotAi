@@ -3,19 +3,19 @@ import sys
 from pathlib import Path
 from fastapi import FastAPI
 import uvicorn
-from pyrogram import Client
+from pyrogram import Client, idle
+from pyrogram.errors import FloodWait
+import time
 from config import config
 from handlers import load_handlers
 
-# Initialize FastAPI app for health checks
 app = FastAPI()
 
 @app.get("/")
 async def health_check():
-    return {"status": "running", "bot": "active"}
+    return {"status": "running"}
 
 async def run_web_server():
-    """Run the health check server"""
     config = uvicorn.Config(
         app,
         host="0.0.0.0",
@@ -27,7 +27,6 @@ async def run_web_server():
     await server.serve()
 
 async def run_bot():
-    """Main bot execution"""
     bot = Client(
         "save_restricted_bot",
         api_id=config.API_ID,
@@ -37,37 +36,48 @@ async def run_bot():
     )
     
     try:
-        await bot.start()
+        # Handle flood wait errors
+        try:
+            await bot.start()
+        except FloodWait as e:
+            print(f"⏳ Flood wait required: {e.value} seconds")
+            time.sleep(e.value + 5)  # Add buffer time
+            await bot.start()
+            
         print("✅ Bot started successfully!")
-        
-        # Manually load all handlers
         load_handlers(bot)
-        
-        print("🔄 Bot is running and handling messages...")
+        print("🔄 Bot is running...")
         await idle()
         
     except Exception as e:
-        print(f"❌ Bot error: {e}")
+        print(f"❌ Bot error: {type(e).__name__}: {e}")
     finally:
-        if await bot.is_connected():
+        if hasattr(bot, 'is_connected') and bot.is_connected:  # Fixed connection check
             await bot.stop()
             print("🛑 Bot stopped")
 
 async def main():
-    # Run both services concurrently
-    await asyncio.gather(
-        run_web_server(),
-        run_bot()
-    )
+    # Run services with proper error handling
+    try:
+        await asyncio.gather(
+            run_web_server(),
+            run_bot()
+        )
+    except asyncio.CancelledError:
+        print("🚨 Received shutdown signal")
+    except Exception as e:
+        print(f"🔥 Critical error: {type(e).__name__}: {e}")
 
 if __name__ == "__main__":
-    # Configure asyncio for better stability
+    # Configure asyncio policy for stability
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     
+    # Run with proper cleanup
+    loop = asyncio.new_event_loop()
     try:
-        asyncio.run(main())
+        loop.run_until_complete(main())
     except KeyboardInterrupt:
-        print("\n🚨 Received shutdown signal")
-    except Exception as e:
-        print(f"🔥 Critical failure: {e}")
+        print("\n🛑 Manual shutdown requested")
+    finally:
+        loop.close()
