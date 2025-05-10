@@ -2,6 +2,7 @@ import asyncio
 import sys
 import time
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from pyrogram import Client, idle
 from pyrogram.errors import FloodWait
 import uvicorn
@@ -10,24 +11,33 @@ from handlers import load_handlers
 
 app = FastAPI()
 
+# Global health status
+health_status = {
+    "status": "starting",
+    "details": "Initializing bot services"
+}
+
 @app.get("/")
 async def health_check():
-    return {"status": "ok", "bot": "initializing"}
+    return JSONResponse(content=health_status)
 
 async def run_web_server():
-    """Run the health check server separately"""
+    """Run health check server with enhanced reliability"""
     config = uvicorn.Config(
         app,
         host="0.0.0.0",
         port=8000,
         log_level="warning",
+        timeout_keep_alive=60,
         access_log=False
     )
     server = uvicorn.Server(config)
     await server.serve()
 
-async def start_bot_with_retry():
-    """Handle flood wait with exponential backoff"""
+async def start_bot():
+    """Bot startup with comprehensive error handling"""
+    global health_status
+    
     bot = Client(
         "save_restricted_bot",
         api_id=config.API_ID,
@@ -36,59 +46,62 @@ async def start_bot_with_retry():
         in_memory=True
     )
     
-    max_retries = 5
-    base_delay = 5  # seconds
-    
-    for attempt in range(max_retries):
-        try:
-            await bot.start()
-            print("✅ Bot started successfully!")
-            return bot
-            
-        except FloodWait as e:
-            wait_time = e.value
-            print(f"⏳ Attempt {attempt + 1}: Flood wait required - {wait_time} seconds")
-            
-            # Update health check status during wait
-            @app.get("/")
-            async def health_check():
-                return {"status": "waiting", "retry_in": wait_time, "attempt": attempt + 1}
-            
-            time.sleep(wait_time + base_delay * (attempt + 1))
-            
-        except Exception as e:
-            print(f"❌ Attempt {attempt + 1} failed: {type(e).__name__}: {e}")
-            if attempt == max_retries - 1:
-                raise
-            time.sleep(base_delay * (attempt + 1))
-    
-    raise Exception("Failed to start bot after multiple attempts")
-
-async def run_bot():
-    bot = await start_bot_with_retry()
-    
-    # Update health check status
-    @app.get("/")
-    async def health_check():
-        return {"status": "running", "bot": "active"}
-    
     try:
+        # Update health status
+        health_status = {"status": "connecting", "details": "Connecting to Telegram"}
+        
+        await bot.start()
+        health_status = {"status": "running", "details": "Bot active and healthy"}
+        print("✅ Bot started successfully!")
+        
         load_handlers(bot)
         print("🔄 Bot is running and handling messages...")
+        return bot
+        
+    except FloodWait as e:
+        health_status = {
+            "status": "waiting",
+            "details": f"Telegram flood wait: {e.value} seconds",
+            "retry_in": e.value
+        }
+        print(f"⏳ Flood wait required: {e.value} seconds")
+        time.sleep(e.value + 5)
+        return await start_bot()  # Retry
+        
+    except Exception as e:
+        health_status = {
+            "status": "error",
+            "details": f"Startup failed: {str(e)}",
+            "error": type(e).__name__
+        }
+        raise
+
+async def run_bot():
+    """Main bot running loop"""
+    global health_status
+    bot = None
+    
+    try:
+        bot = await start_bot()
         await idle()
         
     except Exception as e:
+        health_status = {
+            "status": "error",
+            "details": f"Runtime error: {str(e)}",
+            "error": type(e).__name__
+        }
         print(f"⚠️ Bot runtime error: {type(e).__name__}: {e}")
     finally:
-        if bot.is_connected:
+        if bot and bot.is_connected:
             await bot.stop()
+            health_status = {"status": "stopped", "details": "Bot shut down gracefully"}
             print("🛑 Bot stopped gracefully")
 
 async def main():
-    # Start web server immediately
+    """Main application entry point"""
     server_task = asyncio.create_task(run_web_server())
     
-    # Then start bot with retry logic
     try:
         await run_bot()
     finally:
@@ -99,16 +112,24 @@ async def main():
             pass
 
 if __name__ == "__main__":
-    # Configure asyncio policy
+    # Configure asyncio for maximum stability
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     
     loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
     try:
         loop.run_until_complete(main())
     except KeyboardInterrupt:
+        health_status = {"status": "stopped", "details": "Manual shutdown"}
         print("\n🛑 Received shutdown signal")
     except Exception as e:
+        health_status = {
+            "status": "error",
+            "details": f"Critical failure: {str(e)}",
+            "error": type(e).__name__
+        }
         print(f"🔥 Critical failure: {type(e).__name__}: {e}")
     finally:
         loop.close()
