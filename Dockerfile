@@ -4,31 +4,29 @@ FROM python:3.9-slim
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ffmpeg \
+    git \
     gcc \
     python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Set working directory
 WORKDIR /app
 
-# Install Python dependencies first for better caching
-COPY requirements.txt .
+# Clone your repository
+RUN git clone https://github.com/vijaykumar58/Save-Restricted-Content-BotAi .
+
+# Install Python dependencies
 RUN pip install --upgrade pip && \
     pip install -r requirements.txt && \
-    pip install TgCrypto  # Explicitly install TgCrypto
+    pip install TgCrypto
 
-# Copy all files
-COPY . .
-
-# Environment variables (override these in Koyeb)
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
+# Set Python path
+ENV PYTHONPATH=/app
 
 # Expose port (though Telegram bot doesn't need external ports)
 EXPOSE 8000
 
 CMD ["python", "main.py"]
-
-
-
-
+ 
+ 
  
