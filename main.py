@@ -1,11 +1,10 @@
 import asyncio
 import sys
-from pathlib import Path
+import time
 from fastapi import FastAPI
-import uvicorn
 from pyrogram import Client, idle
 from pyrogram.errors import FloodWait
-import time
+import uvicorn
 from config import config
 from handlers import load_handlers
 
@@ -13,9 +12,10 @@ app = FastAPI()
 
 @app.get("/")
 async def health_check():
-    return {"status": "running"}
+    return {"status": "ok", "bot": "initializing"}
 
 async def run_web_server():
+    """Run the health check server separately"""
     config = uvicorn.Config(
         app,
         host="0.0.0.0",
@@ -26,7 +26,8 @@ async def run_web_server():
     server = uvicorn.Server(config)
     await server.serve()
 
-async def run_bot():
+async def start_bot_with_retry():
+    """Handle flood wait with exponential backoff"""
     bot = Client(
         "save_restricted_bot",
         api_id=config.API_ID,
@@ -35,49 +36,80 @@ async def run_bot():
         in_memory=True
     )
     
-    try:
-        # Handle flood wait errors
+    max_retries = 5
+    base_delay = 5  # seconds
+    
+    for attempt in range(max_retries):
         try:
             await bot.start()
-        except FloodWait as e:
-            print(f"⏳ Flood wait required: {e.value} seconds")
-            time.sleep(e.value + 5)  # Add buffer time
-            await bot.start()
+            print("✅ Bot started successfully!")
+            return bot
             
-        print("✅ Bot started successfully!")
+        except FloodWait as e:
+            wait_time = e.value
+            print(f"⏳ Attempt {attempt + 1}: Flood wait required - {wait_time} seconds")
+            
+            # Update health check status during wait
+            @app.get("/")
+            async def health_check():
+                return {"status": "waiting", "retry_in": wait_time, "attempt": attempt + 1}
+            
+            time.sleep(wait_time + base_delay * (attempt + 1))
+            
+        except Exception as e:
+            print(f"❌ Attempt {attempt + 1} failed: {type(e).__name__}: {e}")
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(base_delay * (attempt + 1))
+    
+    raise Exception("Failed to start bot after multiple attempts")
+
+async def run_bot():
+    bot = await start_bot_with_retry()
+    
+    # Update health check status
+    @app.get("/")
+    async def health_check():
+        return {"status": "running", "bot": "active"}
+    
+    try:
         load_handlers(bot)
-        print("🔄 Bot is running...")
+        print("🔄 Bot is running and handling messages...")
         await idle()
         
     except Exception as e:
-        print(f"❌ Bot error: {type(e).__name__}: {e}")
+        print(f"⚠️ Bot runtime error: {type(e).__name__}: {e}")
     finally:
-        if hasattr(bot, 'is_connected') and bot.is_connected:  # Fixed connection check
+        if bot.is_connected:
             await bot.stop()
-            print("🛑 Bot stopped")
+            print("🛑 Bot stopped gracefully")
 
 async def main():
-    # Run services with proper error handling
+    # Start web server immediately
+    server_task = asyncio.create_task(run_web_server())
+    
+    # Then start bot with retry logic
     try:
-        await asyncio.gather(
-            run_web_server(),
-            run_bot()
-        )
-    except asyncio.CancelledError:
-        print("🚨 Received shutdown signal")
-    except Exception as e:
-        print(f"🔥 Critical error: {type(e).__name__}: {e}")
+        await run_bot()
+    finally:
+        server_task.cancel()
+        try:
+            await server_task
+        except asyncio.CancelledError:
+            pass
 
 if __name__ == "__main__":
-    # Configure asyncio policy for stability
+    # Configure asyncio policy
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     
-    # Run with proper cleanup
     loop = asyncio.new_event_loop()
     try:
         loop.run_until_complete(main())
     except KeyboardInterrupt:
-        print("\n🛑 Manual shutdown requested")
+        print("\n🛑 Received shutdown signal")
+    except Exception as e:
+        print(f"🔥 Critical failure: {type(e).__name__}: {e}")
     finally:
         loop.close()
+        print("🚪 All services shut down")
